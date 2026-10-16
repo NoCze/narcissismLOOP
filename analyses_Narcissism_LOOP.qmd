@@ -1,0 +1,1185 @@
+---
+title: "Analyses and Results - Self-enhancement and devaluation of others during belief formation are linked to narcissistic traits"
+format:
+  html:
+   page-layout: article
+   self-contained: true
+   code-overflow: wrap
+   code-fold: true
+   code-tools: true
+   code-summary: "Show the code"
+   toc: true
+author: "Merle Matthiesen, Laura Rosenbusch, Laura M&uuml;ller-Pinzler, Nora Czekalla"
+editor: visual
+warning: false
+---
+
+# Introduction
+
+This documents serves to reproduce the analyses and to share the code of the manuscript "Self-enhancement and devaluation of others during belief formation are linked to narcissistic traits" by Matthiesen et al..
+
+::: callout-note
+If you are accessing this from the Quarto .qmd-file downloaded from the repository, along with all its subfolders and opened in RStudio, you can execute the embedded code directly to reproduce the corresponding results. Please note that you may need to install additional packages to do this.
+
+Please note that this document covers the analyses of the behavioral data together with parameters obtained from the computational modeling process. However, it does not cover the modeling process itself or the associated code. Due to the complexity of this process and the involvement of additional packages, toolboxes, and software, these aspects fall outside the scope of this Quarto document. If you are interested in more details regarding these elements, please contact the authors (see the manuscript for contact information).
+:::
+
+# Data preparation
+
+```{r}
+#| label: library
+#| warning: false
+
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(gt)
+library(lavaan)
+library(psych)
+library(Hmisc)
+```
+
+```{r}
+#| label: custom functions
+#| warning: false
+
+# function to adjust p-values smaller than .001 to exactly .001 for easier presentation in text or tables
+custom_p <- function(x, threshold = 0.001) {
+  ifelse(x < threshold, 
+         "< .001", 
+         sub("^0\\.", ".", formatC(round(x, 3), format = "f", digits = 3)))
+}
+
+```
+
+```{r}
+#| label: load data
+
+all_data <- read.csv("./01_data/data_all_NARQ.csv")
+
+# median split for plots
+narq_median <- median(all_data$NARQ, na.rm = TRUE)
+all_data$GroupNar <- ifelse(all_data$NARQ <= narq_median, "Low", "High")
+```
+
+```{r}
+# layout for gt tables
+gt_layout <- function(x) {
+    tab_options(
+      x,
+      table.font.names = "Times New Roman",
+      table.font.size =16,
+      heading.title.font.size = 16,
+      table.border.top.style = "hidden",
+      table.border.bottom.style = "hidden"
+    ) %>%
+    tab_style(
+      style = cell_borders(
+        sides = c("top", "bottom"),
+        color = "white"
+      ),
+      locations = cells_body()
+    )%>%
+    tab_style(
+      style = list(cell_borders(
+        sides = c("top", "bottom"),
+        color = "white"),
+        cell_text(weight = "bold")),
+      locations = cells_row_groups()
+    )%>%
+    tab_style(
+      style = cell_borders(
+        sides = c("bottom"),
+        weight=px(2),
+        color = "black"),
+      locations =  cells_title()
+    )%>%
+    tab_style(
+      style = cell_text(align = "left"),
+      locations = cells_body(columns = 1)
+    )%>%
+    tab_style(
+      style = cell_borders(
+        sides = c("top"),
+        weight=px(2),
+        color = "black"),
+      locations =  cells_footnotes()
+    )%>%
+    sub_missing(
+      missing_text = ""
+    )
+}
+```
+
+## Descriptives
+
+### Sample characteristics
+
+The clinical sample (n = 65, 26 females, aged 19 - 60, M = 37.4, SD = 11.5) included individuals diagnosed with depression. The healthy sample (n = 32, 10 females, aged 18 -55, M = 34.3, SD = 10.2) was recruited via the University's email list and flyers. In this study both samples were combined to maximize the sample size and make use of a wide variance in trait narcissism. The overall data set therefore consisted of 97 participants (36 female, aged 18-60, M = 36.4, SD = 11.2).
+
+::: callout-note
+For reasons of data protection, the demographic variables have been removed from the published data set. Therefore, a replication of the supplementary table 7 is not possible in the scope of this Quarto document.
+:::
+
+## Statistical Analyses
+
+### Model-agnostic behavioral analyses
+
+We performed a model-agnostic analysis on the participants' expected performance ratings for each trial to capture the basic effects of belief updating in our observed data. We employed a linear mixed model with restricted maximum likelihood estimation. The model included the factors Ability (High/Low) x Agent (Self/Other) x NARQ x Trial (20 trials) as a continuous predictor. Intercept, Ability, Agent, NARQ, and Trial were modeled as fixed effects. Random intercepts and random slopes for all within-subject factors (Ability, Agent, and Trial) were included for each participant. Further, another linear mixed model was implemented that additionally included Group (MDD/ CON) as a factor (fixed effect) to control for potential differences between groups.
+
+```{r}
+#| label: prepare expectation data long format
+#| warning: false
+
+## linear mixed model on expectation ratings
+# prepare data in long format
+exp_long <- all_data |> 
+  select(subj, Group, NARQ_zent, starts_with("exp_self"), starts_with("exp_other")) |>
+  pivot_longer( cols = matches("^exp_"), 
+                names_to = c("SelfOther", "Ability", "trial"),
+                names_pattern = "^(?:exp|pred)_(self|other)(pos|neg)_(\\d+)$",
+                values_to = "EXP"
+                ) |> 
+  #set reference level to: CON, other, high 
+  mutate(
+    Group = factor(Group, levels = c("CON", "MDD")),
+    SelfOther = factor(SelfOther, levels = c("other", "self")),
+    Ability = factor(Ability, levels = c("pos", "neg"),
+                     labels = c("high", "low")),
+    trial = as.numeric(trial)
+  )
+```
+
+```{r}
+#| label: linear mixed model expectation ratings (main result)
+#| warning: false
+
+# Model (main results)
+GLMmodel <- lmer(
+  EXP ~ trial * SelfOther * Ability *NARQ_zent +
+    (1 + trial + SelfOther + Ability | subj),
+  data = exp_long
+)
+```
+
+```{r}
+#| label: prepare results text GLMmodel
+#| warning: false
+
+s_mexp <- summary(GLMmodel)$coefficients
+GLMmodel_ci <- confint(GLMmodel, method = "Wald", parm = "beta_")
+
+betas_exp <- s_mexp[, "Estimate"]
+dfs_exp <- s_mexp[,"df"]
+ts_exp <- s_mexp[, "t value"]
+ps_exp <- s_mexp[, "Pr(>|t|)"]
+```
+
+To quantify how individuals adapt the performance expectation for themselves and the other person towards the presented feedback and how narcissistic personality traits alter this process, a model-free behavioral analysis was implemented first. Consistent with previous results, the Ability (High vs Low) x Agent (Self vs Other) x Trial x NARQ linear mixed model showed that participants adapted their performance expectation ratings according to the feedback (Ability x Trial interaction ($\beta$ = `r round(betas_exp["trial:Abilitylow"], 2)` \[`r round(GLMmodel_ci["trial:Abilitylow",1],2)`, `r round(GLMmodel_ci["trial:Abilitylow",2],2)`\], *t*(`r round(dfs_exp["trial:Abilitylow"],0)`) = `r round(ts_exp["trial:Abilitylow"],2)`, *p* \< .001),thus formed a new ability belief over time (see Fig. 1B). Moreover, participants evaluated their own performance increasingly more negatively compared to the other person's performance (main effect Agent ($\beta$ = `r round(betas_exp["SelfOtherself"], 2)` \[`r round(GLMmodel_ci["SelfOtherself",1],2)`, `r round(GLMmodel_ci["SelfOtherself",2],2)`\], *t*(`r round(dfs_exp["SelfOtherself"],0)`) = `r round(ts_exp["SelfOtherself"],2)`, *p* \< .001; Trial x Agent interaction ($\beta$ = `r round(betas_exp["trial:SelfOtherself"], 2)` \[`r round(GLMmodel_ci["trial:SelfOtherself",1],2)`, `r round(GLMmodel_ci["trial:SelfOtherself",2],2)`\], *t*(`r round(dfs_exp["trial:SelfOtherself"],0)`) = `r round(ts_exp["trial:SelfOtherself"],2)`, *p* \< .001). Individuals high in narcissistic personality traits had higher performance expectations compared to low narcissistic ones, specifically for themselves (Agent x NARQ interaction $\beta$ = `r round(betas_exp["SelfOtherself:NARQ_zent"], 2)` \[`r round(GLMmodel_ci["SelfOtherself:NARQ_zent",1],2)`, `r round(GLMmodel_ci["SelfOtherself:NARQ_zent",2],2)`\], *t*(`r round(dfs_exp["SelfOtherself:NARQ_zent"],0)`) = `r round(ts_exp["SelfOtherself:NARQ_zent"],2)`, *p* = `r round(ps_exp["SelfOtherself:NARQ_zent"],3)`). These higher self-related performance expectations increased over time $\beta$ = `r round(betas_exp["trial:SelfOtherself:NARQ_zent"], 2)` \[`r round(GLMmodel_ci["trial:SelfOtherself:NARQ_zent",1],2)`, `r round(GLMmodel_ci["trial:SelfOtherself:NARQ_zent",2],2)`\], *t*(`r round(dfs_exp["trial:SelfOtherself:NARQ_zent"],0)`) = `r round(ts_exp["trial:SelfOtherself:NARQ_zent"],2)`, *p* = `r round(ps_exp["trial:SelfOtherself:NARQ_zent"],3)`), which can indicate greater self-belief updating after positive feedback or reduced self-belief updating after negative feedback (see Supplementary Table 1 for full results and Supplementary Table 2 for control analysis including group).
+
+```{r}
+#| label: Supplementary Table 1. Model-agnostic analysis of belief-updating behavior
+#| warning: false
+
+tbl <- data.frame(
+  pred = c("(Intercept)", 
+           "Trial", 
+           "Agent [Self]", 
+           "Ability [Low]",
+           "NARQ",
+           "Agent x Trial",
+           "Ability x Trial",
+           "Ability x Agent",
+           "Trial x NARQ",
+           "Agent x NARQ",
+           "Ability x NARQ",
+           "Ability x Agent x Trial",
+           "Agent x Trial x NARQ",
+           "Ability x Trial x NARQ",
+           "Ability x Agent x NARQ",
+           "Ability x Agent x Trial x NARQ"
+  ),
+  summary(GLMmodel)$coefficients
+)
+
+tbl$Estimate    <- round(tbl$Estimate, 2)
+tbl$Std..Error  <- round(tbl$Std..Error, 2)
+tbl$lower       <- round(GLMmodel_ci[, 1], 2)
+tbl$upper       <- round(GLMmodel_ci[, 2], 2)
+tbl$t.value     <- round(tbl$t.value, 2)
+tbl$df <- round(tbl$df, 1)
+tbl$Pr...t..    <- sapply(tbl$Pr...t.., custom_p)
+
+tbl <- relocate(tbl, lower:upper, .before = df)
+
+suppl_table_1 <- gt(tbl)|>
+  tab_header(
+    title = md("*Supplementary Table 1.* Model-agnostic analysis of belief-updating behavior")
+  )|>
+  opt_align_table_header(align = "left")|>
+  cols_label(
+    pred = md(" "),
+    Estimate = md("*Estimate*"),
+    Std..Error = md("*SE*"),
+    df = md("*df*"),
+    t.value = md("*t*"),
+    Pr...t.. = md("*p*")
+  )|>
+  tab_spanner(
+    label = md("95% CI"),
+    columns = c(lower:upper)
+  )|>
+  cols_align(
+    align = "center"
+  )|>
+  tab_source_note(
+    source_note = md("*Note.* Trial (continuous, 1-20) x Agent [Self, Other] x Ability condition [High, Low] x NARQ linear mixed-effects model fit by maximum likelihood. Dependent variable: trial-by-trial ratings of expected performance. Beta-estimate, *SE* = standard error, *CI* = confidence interval, *df* = degrees of freedom, *t* = t-value.")
+  )|>
+  gt_layout(
+  )
+
+suppl_table_1
+
+gtsave(suppl_table_1, filename = "./03_tables/suppl_table_1.html")
+
+```
+
+```{r}
+#| label: linear mixed model expectation ratings incl. group (suppl.)
+#| warning: false
+
+# Model including group (Supplement)
+GLMmodelGroup <- lmer(
+  EXP ~ trial * SelfOther * Ability * Group +
+    (1 + trial + SelfOther + Ability | subj),
+  data = exp_long
+)
+```
+
+```{r}
+#| label: Supplementary Table 2. Model-agnostic analysis of belief-updating behavior including Group
+#| warning: false
+
+GLMmodelGroup_ci <- confint(GLMmodelGroup, method = "Wald", parm = "beta_")
+
+tbl <- data.frame(
+  pred = c("(Intercept)", 
+           "Trial", 
+           "Agent [Self]",
+           "Ability [Low]",
+           "Group [MDD]",
+           "Agent x Trial",
+           "Ability x Trial",
+           "Ability x Agent",
+           "Trial x Group",
+           "Agent x Group",
+           "Ability x Group",
+           "Ability x Agent x Trial",
+           "Agent x Trial x Group",
+           "Ability x Trial x Group",
+           "Ability x Agent x Group",
+           "Ability x Agent x Trial x Group"
+           ),
+  summary(GLMmodelGroup)$coefficients
+)
+
+tbl$Estimate    <- round(tbl$Estimate, 2)
+tbl$Std..Error  <- round(tbl$Std..Error, 2)
+tbl$lower       <- round(GLMmodelGroup_ci[, 1], 2)
+tbl$upper       <- round(GLMmodelGroup_ci[, 2], 2)
+tbl$t.value     <- round(tbl$t.value, 2)
+tbl$df <- round(tbl$df, 1)
+tbl$Pr...t..    <- sapply(tbl$Pr...t.., custom_p)
+
+tbl <- relocate(tbl, lower:upper, .before = df)
+
+suppl_table_2 <- gt(tbl)|>
+  tab_header(
+    title = md("*Supplementary Table 2.* Model-agnostic analysis of belief-updating behavior including Group")
+  )|>
+  opt_align_table_header(align = "left")|>
+  cols_label(
+    pred = md(" "),
+    Estimate = md("*Estimate*"),
+    Std..Error = md("*SE*"),
+    df = md("*df*"),
+    t.value = md("*t*"),
+    Pr...t.. = md("*p*")
+  )|>
+  tab_spanner(
+    label = md("95% CI"),
+    columns = c(lower:upper)
+  )|>
+  cols_align(
+    align = "center"
+  )|>
+  tab_source_note(
+    source_note = md("*Note.* Trial (continuous, 1-20) x Agent [Self, Other] x Ability condition [High, Low] x Group [MDD, CON] linear mixed-effects model fit by maximum likelihood. Dependent variable: trial-by-trial ratings of expected performance. Beta-estimate, *SE* = standard error, *CI* = confidence interval, *df* = degrees of freedom, *t* = t-value.")
+  )|>
+  gt_layout(
+  )
+
+suppl_table_2
+
+gtsave(suppl_table_2, filename = "./03_tables/suppl_table_2.html")
+```
+
+#### Supplementary Note 1: Posterior predictive checks - Behavioral analyses on the predicted data.
+
+```{r}
+#| label: prepare predicted expectations data long format
+#| warning: false
+
+## linear mixed model on predicted expectation ratings
+# prepare data in long format
+pred_long <- all_data |> 
+  select(subj, Group, NARQ_zent, starts_with("pred_self"), starts_with("pred_other")) |>
+  pivot_longer( cols = matches("^pred_"), 
+                names_to = c("SelfOther", "Ability", "trial"),
+                names_pattern = "^(?:pred)_(self|other)(pos|neg)_(\\d+)$",
+                values_to = "PRED"
+  ) |> 
+  #set reference level: CON, other, high
+  mutate(
+    Group = factor(Group, levels = c("CON", "MDD")),
+    SelfOther = factor(SelfOther, levels = c("other", "self")),
+    Ability = factor(Ability, levels = c("pos", "neg"),
+                     labels = c("high", "low")),
+    trial = as.numeric(trial)
+  )
+```
+
+```{r}
+#| label: linear mixed model predicted expectation ratings
+#| warning: false
+
+# Model (main results)
+GLMmodel_pred <- lmer(
+  PRED ~ trial * SelfOther * Ability * NARQ_zent +
+    (1 + trial + SelfOther + Ability | subj),
+  data = pred_long
+)
+```
+
+```{r}
+#| label: prepare results text GLMmodel_pred
+#| warning: false
+
+s_mexp <- summary(GLMmodel_pred)$coefficients
+GLMmodel_pred_ci <- confint(GLMmodel_pred, method = "Wald", parm = "beta_")
+
+betas_exp <- s_mexp[, "Estimate"]
+dfs_exp <- s_mexp[,"df"]
+ts_exp <- s_mexp[, "t value"]
+ps_exp <- s_mexp[, "Pr(>|t|)"]
+```
+
+We repeated the same analyses as for the behavioral data (linear mixed model) using the predicted data from the winning model to see whether our winning model captured the core effects in our model-agnostic analysis. We could reproduce the main effects from the model-agnostic analysis with the predicted data (main effect Ability condition: *t*(`r round(dfs_exp["Abilitylow"],0)`) = `r round(ts_exp["Abilitylow"],2)`, *p* = `r round(ps_exp["Abilitylow"],3)`), main effect Agent condition: *t*(`r round(dfs_exp["SelfOtherself"],0)`) = `r round(ts_exp["SelfOtherself"],2)`, *p* \< .001, interaction Trial x Ability condition: *t*(`r round(dfs_exp["trial:Abilitylow"],0)`) = `r round(ts_exp["trial:Abilitylow"],2)`, *p* \< .001, interaction Trial x Agent condition *t*(`r round(dfs_exp["trial:SelfOtherself"],0)`) = `r round(ts_exp["trial:SelfOtherself"],2)` , *p* \<.001). The effects related to narcissistic personality traits could also be reproduced (Agent x NARQ interaction *t*(`r round(dfs_exp["SelfOtherself:NARQ_zent"],0)`) = `r round(ts_exp["SelfOtherself:NARQ_zent"],2)`, *p* = `r round(ps_exp["SelfOtherself:NARQ_zent"],3)`, Agent x Trial x NARQ interaction *t*(`r round(dfs_exp["trial:SelfOtherself:NARQ_zent"],0)`) = `r round(ts_exp["trial:SelfOtherself:NARQ_zent"],2)`, *p* \<.001). This confirms that the winning model recapitulates the main effects in our data (see Supplementary Table 9 for all results).
+
+#### Supplementary Table 9. Analysis of model predicted performance expectations
+
+```{r}
+#| label: Supplementary Table 9. Analysis of model predicted performance expectations
+#| warning: false
+
+GLMmodel_pred_ci <- confint(GLMmodel_pred, method = "Wald", parm = "beta_")
+
+tbl <- data.frame(
+  pred = c("(Intercept)", 
+           "Trial", 
+           "Agent [Self]", 
+           "Ability [Low]",
+            "NARQ",
+           "Agent x Trial",
+           "Ability x Trial",
+           "Ability x Agent",
+           "Trial x NARQ",
+           "Agent x NARQ",
+           "Ability x NARQ",
+           "Ability x Agent x Trial",
+           "Agent x Trial x NARQ",
+           "Ability x Trial x NARQ",
+           "Ability x Agent x NARQ",
+           "Ability x Agent x Trial x NARQ"),
+  summary(GLMmodel_pred)$coefficients
+)
+
+tbl$Estimate    <- round(tbl$Estimate, 2)
+tbl$Std..Error  <- round(tbl$Std..Error, 2)
+tbl$lower       <- round(GLMmodel_pred_ci[, 1], 2)
+tbl$upper       <- round(GLMmodel_pred_ci[, 2], 2)
+tbl$t.value     <- round(tbl$t.value, 2)
+tbl$df <- round(tbl$df, 1)
+tbl$Pr...t..    <- sapply(tbl$Pr...t.., custom_p)
+
+tbl <- relocate(tbl, lower:upper, .before = df)
+
+suppl_table_9 <- gt(tbl)|>
+  tab_header(
+    title = md("*Supplementary Table 9.* Analysis of model predicted performance expectations")
+  )|>
+  opt_align_table_header(align = "left")|>
+  cols_label(
+    pred = md(" "),
+    Estimate = md("*Estimate*"),
+    Std..Error = md("*SE*"),
+    df = md("*df*"),
+    t.value = md("*t*"),
+    Pr...t.. = md("*p*")
+  )|>
+  tab_spanner(
+    label = md("95% CI"),
+    columns = c(lower:upper)
+  )|>
+  cols_align(
+    align = "center"
+  )|>
+  tab_source_note(
+    source_note = md("*Note.* Trial (continuous, 1-20) x Agent [Self, Other] x Ability condition [High, Low] x NARQ linear mixed-effects model fit by restricted maximum likelihood. Dependent variable: predicted trial-by-trial values by the winning computational model. Beta-estimate, *SE* = standard error, *CI* = confidence interval, *df* = degrees of freedom, *t* = t-value.")
+  )|>
+  gt_layout(
+  )
+
+suppl_table_9
+
+gtsave(suppl_table_9, filename = "./03_tables/suppl_table_9.html")
+```
+
+### Analyses of learning rates
+
+Learning rates derived from the weighted Valence Model (winning computational model) were analyzed in a linear mixed model with a restricted maximum likelihood estimation. The model included the factors PE Valence (Pos/ Neg) x Agent (Self/Other) x NARQ. Intercept, PE Valence, Agent, and NARQ were modeled as fixed effects. Random intercepts and a random slope for Agent were included for each participant. A random slope for PE Valence was not included because the model failed to converge when both random slopes were specified. Further, another linear mixed model was implemented that additionally included Group (MDD/ CON) instead of NARQ as a factor (fixed effect) to control for and assess potential differences between groups.
+
+#### Table 1. Spearman Correlations between variables
+
+```{r}
+#| label: prepare correlation data
+#| warning: false
+
+df_par <- all_data |> 
+  select(NARQ, prideSelf, a_posSelf, b_negSelf, c_posOther, d_negOther)
+```
+
+```{r}
+#| label: prepare table 1. Spearman Correlations between variables
+#| warning: false
+
+corr <- rcorr(as.matrix(df_par), type = "spearman")
+
+rho <- corr$r
+p <- corr$P
+
+stars <- ifelse(p < .001, "***",
+                ifelse(p < .01, "**",
+                ifelse(p < .05, "*", "")))
+
+
+tab <- matrix("", nrow = nrow(rho), ncol = ncol(rho))
+
+for(i in 2:nrow(rho)){
+  for(j in 1:(i-1)){
+    tab[i,j] <- sprintf("%.3f%s", rho[i,j], stars[i,j])
+  }
+}
+
+tab <- as.data.frame(tab)
+
+
+var_names <- c(
+  "NARQ",
+  "Pride",
+  "alphaPE+ Self",
+  "alphaPE- Self",
+  "alphaPE+ Other",
+  "alphaPE- Other"
+)
+
+colnames(tab) <- var_names
+tab <- tibble::rownames_to_column(tab, var = "Variable")
+tab$Variable <- var_names
+
+
+table1 <- tab |>
+  gt(rowname_col = "Variable") |>
+  tab_header(
+    title = md("*Table 1.* Spearman correlations between variables")
+  ) |>
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) |>
+  opt_align_table_header(align = "left") |>
+  tab_source_note(
+    source_note = md(
+      "*Note.* Correlation table showing Spearman correlations for all predictor, mediator, and dependent variables used in the path-analytic mediation model. * *p* < .05, ** *p* < .01, *** *p* < .001."
+    )
+  ) |> 
+  tab_style(
+    style = cell_borders(
+      sides = "right",
+      weight = px(0)
+    ),
+    locations = cells_stub()
+  )|>
+  gt_layout(
+  )
+
+table1
+
+gtsave(table1, filename = "./03_tables/table_1.html")
+```
+
+```{r}
+#| label: prepare long data learning rates
+#| warning: false
+
+learning_rates_long <- all_data |> 
+  select(subj, Group, NARQ_zent, GroupNar, all_of(c("a_posSelf", "b_negSelf", "c_posOther", "d_negOther"))) |> 
+  pivot_longer(
+    cols = c(a_posSelf, b_negSelf, c_posOther, d_negOther),
+    names_to = c("PE", "SelfOther"),
+    names_pattern = "^[a-d]_(pos|neg)(Self|Other)$",
+    values_to = "LR"
+  ) |> 
+  mutate(
+    Group = factor(Group, levels = c("CON", "MDD")),
+    GroupNar  = factor(GroupNar, levels = c("Low", "High")),
+    SelfOther = factor(SelfOther, levels = c("Other", "Self")),
+    PE = factor(PE, levels = c("neg", "pos"))
+  )
+```
+
+```{r}
+#| label: calculate lmm learning rate
+#| warning: false
+
+lrGLM <- lmer(
+  LR ~ PE * SelfOther * NARQ_zent +
+    (1 + SelfOther | subj),
+  data = learning_rates_long,
+)
+
+# GLM including Group
+lrGLMGroup <- lmer(
+  LR ~ PE * SelfOther * Group +
+    (1 + SelfOther | subj),
+  data = learning_rates_long,
+)
+
+#post-hoc t-test LR self
+lr_self_post_hoc <- learning_rates_long |> 
+  filter(SelfOther == "Self") |> 
+  pivot_wider(values_from = "LR", names_from = "PE")
+
+lr_tt<-t.test(lr_self_post_hoc$neg, lr_self_post_hoc$pos, paired=T)
+```
+
+```{r}
+#| label: prepare results text lmm learning rates
+#| warning: false
+
+s_mlr <- summary(lrGLM)$coefficients
+lrGLM_ci <- confint(lrGLM, method = "Wald", parm = "beta_")
+
+betas_lr <- s_mlr[, "Estimate"]
+dfs_lr <- s_mlr[,"df"]
+ts_lr <- s_mlr[, "t value"]
+ps_lr <- s_mlr[, "Pr(>|t|)"]
+
+p_tt <- lr_tt[["p.value"]]
+t_tt <- lr_tt[["statistic"]][["t"]]
+df_tt <-lr_tt[["parameter"]][["df"]]
+```
+
+As previous studies with the LOOP task have already shown, learning rates are higher for negative compared to positive prediction errors when updating self-beliefs but not for beliefs about the other person (PE-Valence x Agent interaction *t*(`r round(dfs_lr["PEpos:SelfOtherSelf"],0)`) = `r round(ts_lr["PEpos:SelfOtherSelf"],2)`, *p* \< .001; post-hoc: Self α~PE-~ vs. Self α~PE+~ *t*(`r round(df_tt, 2)`) = `r round(t_tt,2)`, *p* \< .001). This self-related negativity bias is reduced in individuals high in narcissistic personality traits (PE-Valence x Agent x NARQ interaction *t*(`r round(dfs_lr["PEpos:SelfOtherSelf:NARQ_zent"],0)`) = `r round(ts_lr["PEpos:SelfOtherSelf:NARQ_zent"],2)`, *p* \< .001; see Supplementary Table 4 for full results and Supplementary Table 5 for control analysis including group).
+
+#### Supplementary Table 4. Analysis of learning rates
+
+```{r}
+#| label: Supplementary Table 4. Analysis of learning rates
+#| warning: false
+
+lrGLM_ci <- confint(lrGLM, method = "Wald", parm = "beta_")
+
+tbl <- data.frame(
+  pred = c("(Intercept)", 
+           "PE Valence [Pos]", 
+           "Agent [Self]", 
+           "NARQ",
+           "PE Valence x Agent",
+           "PE Valence x NARQ",
+           "Agent x NARQ",
+           "PE Valence x Agent x NARQ"
+           ),
+  summary(lrGLM)$coefficients
+)
+
+tbl$Estimate    <- round(tbl$Estimate, 2)
+tbl$Std..Error  <- round(tbl$Std..Error, 3)
+tbl$lower       <- round(lrGLM_ci[, 1], 2)
+tbl$upper       <- round(lrGLM_ci[, 2], 2)
+tbl$t.value     <- round(tbl$t.value, 2)
+tbl$df <- round(tbl$df, 1)
+tbl$Pr...t..    <- sapply(tbl$Pr...t.., custom_p)
+
+tbl <- relocate(tbl, lower:upper, .before = df)
+
+suppl_table_4 <- gt(tbl)|>
+  tab_header(
+    title = md("*Supplementary Table 4.* Analysis of learning rates")
+  )|>
+  opt_align_table_header(align = "left")|>
+  cols_label(
+    pred = md(" "),
+    Estimate = md("*Estimate*"),
+    Std..Error = md("*SE*"),
+    df = md("*df*"),
+    t.value = md("*t*"),
+    Pr...t.. = md("*p*")
+  )|>
+  tab_spanner(
+    label = md("95% CI"),
+    columns = c(lower:upper)
+  )|>
+  cols_align(
+    align = "center"
+  )|>
+  tab_source_note(
+    source_note = md("*Note.* PE Valence [Pos, Neg] x Agent [Self, Other] x NARQ linear mixed-effects model fit by restricted maximum likelihood. Dependent variable: learning rates. Beta-estimate, *SE* = standard error, *CI* = confidence interval, *df* = degrees of freedom, *t* = t-value.")
+  )|>
+  gt_layout()
+
+suppl_table_4
+
+gtsave(suppl_table_4, filename = "./03_tables/suppl_table_4.html")
+```
+
+#### Supplementary Table 5. Analysis of learning rates including Group
+
+```{r}
+#| label: Supplementary Table 5. Analysis of learning rates including Group
+#| warning: false
+
+lrGLMGroup_ci <- confint(lrGLMGroup, method = "Wald", parm = "beta_")
+
+tbl <- data.frame(
+  pred = c("(Intercept)", 
+           "PE Valence [Pos]", 
+           "Agent [Self]", 
+           "Group [MDD]",
+           "PE Valence x Agent",
+           "PE Valence x Group",
+           "Agent x Group",
+           "PE Valence x Agent x Group"
+  ),
+  summary(lrGLMGroup)$coefficients
+)
+
+tbl$Estimate    <- round(tbl$Estimate, 2)
+tbl$Std..Error  <- round(tbl$Std..Error, 3)
+tbl$lower <- round(lrGLMGroup_ci[, 1], 2)
+tbl$upper <- round(lrGLMGroup_ci[, 2], 2)
+tbl$t.value     <- round(tbl$t.value, 2)
+tbl$df <- round(tbl$df, 1)
+tbl$Pr...t..    <- sapply(tbl$Pr...t.., custom_p)
+
+tbl <- relocate(tbl, lower:upper, .before = df)
+
+suppl_table_5 <- gt(tbl)|>
+  tab_header(
+    title = md("*Supplementary Table 5.* Analysis of learning rates including Group")
+  )|>
+  opt_align_table_header(align = "left")|>
+  cols_label(
+    pred = md(" "),
+    Estimate = md("*Estimate*"),
+    Std..Error = md("*SE*"),
+    df = md("*df*"),
+    t.value = md("*t*"),
+    Pr...t.. = md("*p*")
+  )|>
+  tab_spanner(
+    label = md("95% CI"),
+    columns = c(lower:upper)
+  )|>
+  cols_align(
+    align = "center"
+  )|>
+  tab_source_note(
+    source_note = md("*Note.* PE Valence [Pos, Neg] x Agent [Self, Other] x Group [MDD, CON] linear mixed-effects model fit by restricted maximum likelihood. Dependent variable: learning rates. Beta-estimate, *SE* = standard error, *CI* = confidence interval, *df* = degrees of freedom, *t* = t-value.")
+  )|>
+  gt_layout()
+
+suppl_table_5
+gtsave(suppl_table_5, filename = "./03_tables/suppl_table_5.html")
+```
+
+### Path analytic analyses
+
+To assess whether the association between narcissistic personality traits and altered learning about the own or others' abilities was mediated by the experience of pride (average pride ratings during the task), we conducted mediation analyses using path-analytic models estimated in the R (version 4.5.2) lavaan v.6-21 package. Specifically, narcissism (NARQ scores, global scale) was specified as a predictor of pride. Pride (mediator) was then modeled to predict the four learning rates derived from the winning computational model as outcome variables (learning rates for positive self- and other-related prediction errors \[Self α~PE+~; Other α~PE+~\] as well as negative self- and other-related prediction errors \[Self α~PE-~; Other α~PE-~\]). Direct effects of narcissism on each outcome were included to test for partial mediation. All outcome variables were estimated simultaneously, and their residuals were allowed to correlate. Indirect effects for each outcome were defined as the product of the corresponding paths from the predictor towards the mediator and from the mediator towards the outcome and were estimated within the model (see Figure 2). As the sample included a group of individuals with chronic depression (MDD) and a healthy control group (CON), a second model was set up to control for potential effects of group. The main path-analytic model described above was extended by including Group as an additional predictor alongside narcissism. Group was dummy-coded, and the two predictors were allowed to covary.
+
+Standard errors and confidence intervals were obtained using bootstrap resampling (1,000 samples). Models were estimated using maximum likelihood with a mean structure included. As the specified mediation model was just-identified (df = 0), overall model fit indices were not informative and are therefore not reported.
+
+```{r}
+#| label: path-analytic model including Group
+#| warning: false
+
+# path-analytic mediation model
+#The mediation models were estimated as path models using the lavaan package in R,
+#which allows simultaneous estimation of regression equations and bootstrap confidence
+#intervals for indirect effects.
+# Model fit indices are not reported, as the path models were just-identified.
+
+
+model_all <- "
+  # Mediation (a-Pfad)
+  prideSelf_std ~ a * NARQ_zent
+
+  # b- und c-Pfade (Outcomes)
+  a_posSelf   ~ b1 * prideSelf_std + c1 * NARQ_zent
+  b_negSelf   ~ b2 * prideSelf_std + c2 * NARQ_zent
+  c_posOther  ~ b3 * prideSelf_std + c3 * NARQ_zent
+  d_negOther  ~ b4 * prideSelf_std + c4 * NARQ_zent
+
+  # Kovarianzen der Lernraten
+  a_posSelf ~~ b_negSelf + c_posOther + d_negOther
+  b_negSelf ~~ c_posOther + d_negOther
+  c_posOther ~~ d_negOther
+
+  # Indirekte Effekte
+  ind_posSelf   := a * b1
+  ind_negSelf   := a * b2
+  ind_posOther  := a * b3
+  ind_negOther  := a * b4
+"
+set.seed(50)
+fit_all <- sem(
+  model_all,
+  data = all_data,
+  se = "bootstrap",
+  bootstrap = 1000,
+  meanstructure = TRUE
+)
+
+#summary(fit_all, standardized = TRUE, fit.measures = TRUE)
+param_tab <- parameterEstimates(
+  fit_all,
+  standardized = TRUE,
+  ci = TRUE
+)
+```
+
+```{r}
+#| label: table 2. path-analytic model
+#| warning: false
+
+param_tab_gt <- param_tab |>
+  filter(label %in% c("a", "b1", "b2", "b3", "b4", 
+                      "c1", "c2", "c3", "c4",
+                      "ind_posSelf", "ind_negSelf", 
+                      "ind_posOther", "ind_negOther")) |>
+  mutate(
+    Effect = case_when(
+      label == "a"            ~ "NARQ &rarr; Pride",
+      label == "b1"           ~ "Pride &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "b2"           ~ "Pride &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "b3"           ~ "Pride &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "b4"           ~ "Pride &rarr; &alpha;<sub>PE-</sub> Other",
+      label == "c1"           ~ "NARQ &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "c2"           ~ "NARQ &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "c3"           ~ "NARQ &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "c4"           ~ "NARQ &rarr; &alpha;<sub>PE-</sub> Other",
+      label == "ind_posSelf"  ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "ind_negSelf"  ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "ind_posOther" ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "ind_negOther" ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE-</sub> Other"
+    ),
+    type = case_when(
+      label %in% c("ind_posSelf", "ind_negSelf", 
+                   "ind_posOther", "ind_negOther") ~ "Indirect Effects",
+      TRUE                                          ~ "Direct Effects"
+    ),
+    pvalue = ifelse(pvalue < .001, "< .001", sprintf("%.3f", pvalue))
+  ) |>
+  select(type, Effect, est, se, ci.lower, ci.upper, z, pvalue, std.all)
+
+table_2 <- param_tab_gt |>
+  gt(groupname_col = "type") |>
+  tab_header(
+    title = md("*Table 2.* Path-analytic model")
+  ) |>
+  opt_align_table_header(align = "left") |>
+  cols_label(
+    Effect   = md(" "),
+    est      = md("*B*"),
+    se       = md("*SE*"),
+    ci.lower = md("lower"),
+    ci.upper = md("upper"),
+    z        = md("*z*"),
+    pvalue   = md("*p*"),
+    std.all  = md("*&beta;*")
+  ) |>
+  tab_spanner(
+    label   = md("95% CI"),
+    columns = c(ci.lower, ci.upper)
+  ) |>
+  fmt_number(
+    columns = c(z, std.all),
+    decimals = 2
+  ) |>
+  fmt_number(
+    columns = c(est, se, ci.lower, ci.upper),
+    decimals = 3
+  ) |>
+  cols_align(align = "center") |>
+  fmt(
+    columns = Effect, 
+    fns = function(x) lapply(x, gt::md)
+  ) |> 
+  tab_row_group(label = "Indirect Effects", id = "indirect", 
+                rows = type == "Indirect Effects") |>
+  tab_row_group(label = "Direct Effects",   id = "direct",   
+                rows = type == "Direct Effects") |>
+  tab_source_note(
+    source_note = md("*Note.* Unstandardized coefficients (*B*), standard errors (*SE*), *z* values, *p* values, and 95% bootstrap confidence intervals and standardized coefficients (&beta;) are reported. Indirect effects were estimated using 1,000 bootstrap samples.")
+  )|>
+  gt_layout()
+
+table_2
+
+gtsave(table_2, filename = "./03_tables/table_2.html")
+
+```
+
+#### **Supplementary Note 2: Path-analytic model controlling for potential differences between groups**
+
+```{r}
+#| label: path-analytic model including NARQ and Group
+#| warning: false
+
+model_NARQ_Group <- paste(
+  "prideSelf_std ~ a1*NARQ_zent + a2*Group_c",
+  "a_posSelf ~ b1*prideSelf_std + c1*NARQ_zent + d1*Group_c",
+  "b_negSelf ~ b2*prideSelf_std + c2*NARQ_zent + d2*Group_c",
+  "c_posOther ~ b3*prideSelf_std + c3*NARQ_zent + d3*Group_c",
+  "d_negOther ~ b4*prideSelf_std + c4*NARQ_zent + d4*Group_c",
+  "NARQ_zent ~~ Group_c",
+  "a_posSelf ~~ b_negSelf",
+  "a_posSelf ~~ c_posOther",
+  "a_posSelf ~~ d_negOther",
+  "b_negSelf ~~ c_posOther",
+  "b_negSelf ~~ d_negOther",
+  "c_posOther ~~ d_negOther",
+  "ind_NARQ_posSelf := a1*b1",
+  "ind_NARQ_negSelf := a1*b2",
+  "ind_NARQ_posOther := a1*b3",
+  "ind_NARQ_negOther := a1*b4",
+  "ind_Group_posSelf := a2*b1",
+  "ind_Group_negSelf := a2*b2",
+  "ind_Group_posOther := a2*b3",
+  "ind_Group_negOther := a2*b4",
+  sep = "\n"
+)
+
+# estimation
+set.seed(50)
+fit_NARQ_Group <- sem(
+  model_NARQ_Group,
+  data = all_data,
+  se = "bootstrap",
+  bootstrap = 3000,
+  meanstructure = TRUE
+)
+
+
+#summary(fit_NARQ_Group, standardized = TRUE, fit.measures = TRUE)
+param_tab <- parameterEstimates(
+  fit_NARQ_Group,
+  standardized = TRUE,
+  ci = TRUE
+)
+```
+
+```{r}
+#| label: prepare results text path-analytic model
+#| warning: false
+
+ind_negOther <- param_tab |> filter(label == "ind_NARQ_negOther")
+
+```
+
+As the sample included a group of individuals with chronic depression and a healthy control group another path-analytic model was set up to control for potential effects of group (MDD/ CON). This model mostly replicated the main findings. There was a significant indirect effect of narcissism via pride for self-related positive learning rates and a direct effect of narcissism on self-related negative learning rates (see Supplementary Table 7). The indirect effect of narcissism on other-related negative learning rates via pride showed a trendwise effect when controlling for Group (NARQ → Pride → Other α~PE-~: *B* = `r round(ind_negOther$est, 3)` *SE* = `r round(ind_negOther$se, 3)`, *z* = `r round(ind_negOther$z, 2)`, *p* = `r ifelse(ind_negOther$pvalue < .001, "< .001", round(ind_negOther$pvalue, 3))`, 95% CI \[`r round(ind_negOther$ci.lower, 3)`, `r round(ind_negOther$ci.upper, 3)`\]). There were no significant effects of Group (see Supplementary Table 7 for a full representation of all direct and indirect effects).
+
+#### Supplementary Table 7. Path-analytic model including NARQ and Group
+
+```{r}
+#| label: supplementary table 7. path-analytic model including NARQ and Group
+#| warning: false
+
+param_tab_gt <- param_tab |>
+  filter(label %in% c("a1", "a2", "b1", "b2", "b3", "b4", 
+                      "c1", "c2", "c3", "c4",
+                      "d1", "d2", "d3", "d4",
+                      "ind_NARQ_posSelf", "ind_NARQ_negSelf", 
+                      "ind_NARQ_posOther", "ind_NARQ_negOther",
+                      "ind_Group_posSelf", "ind_Group_negSelf", 
+                      "ind_Group_posOther", "ind_Group_negOther")) |>
+  mutate(
+    Effect = case_when(
+      label == "a1"            ~ "NARQ &rarr; Pride",
+      label == "a2"            ~ "Group &rarr; Pride",
+      label == "b1"           ~ "Pride &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "b2"           ~ "Pride &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "b3"           ~ "Pride &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "b4"           ~ "Pride &rarr; &alpha;<sub>PE-</sub> Other",
+      label == "c1"           ~ "NARQ &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "c2"           ~ "NARQ &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "c3"           ~ "NARQ &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "c4"           ~ "NARQ &rarr; &alpha;<sub>PE-</sub> Other",
+      label == "d1"           ~ "Group &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "d2"           ~ "Group &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "d3"           ~ "Group &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "d4"           ~ "Group &rarr; &alpha;<sub>PE-</sub> Other",
+      label == "ind_NARQ_posSelf"  ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "ind_NARQ_negSelf"  ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "ind_NARQ_posOther" ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "ind_NARQ_negOther" ~ "NARQ &rarr; Pride &rarr; &alpha;<sub>PE-</sub> Other",
+      label == "ind_Group_posSelf"  ~ "Group &rarr; Pride &rarr; &alpha;<sub>PE+</sub> Self",
+      label == "ind_Group_negSelf"  ~ "Group &rarr; Pride &rarr; &alpha;<sub>PE-</sub> Self",
+      label == "ind_Group_posOther" ~ "Group &rarr; Pride &rarr; &alpha;<sub>PE+</sub> Other",
+      label == "ind_Group_negOther" ~ "Group &rarr; Pride &rarr; &alpha;<sub>PE-</sub> Other"
+    ),
+    type = case_when(
+      label %in% c("ind_NARQ_posSelf", "ind_NARQ_negSelf", 
+                   "ind_NARQ_posOther", "ind_NARQ_negOther",
+                   "ind_Group_posSelf", "ind_Group_negSelf", 
+                   "ind_Group_posOther", "ind_Group_negOther") ~ "Indirect Effects",
+      TRUE                                          ~ "Direct Effects"
+    ),
+    pvalue = ifelse(pvalue < .001, "< .001", sprintf("%.3f", pvalue))
+  ) |>
+  select(type, Effect, est, se, ci.lower, ci.upper, z, pvalue, std.all)
+
+suppl_table_7 <- param_tab_gt |>
+  gt(groupname_col = "type") |>
+  tab_header(
+    title = md("*Supplementary Table 7.* Path-analytic model including NARQ and Group")
+  ) |>
+  opt_align_table_header(align = "left") |>
+  cols_label(
+    Effect   = md(" "),
+    est      = md("*B*"),
+    se       = md("*SE*"),
+    ci.lower = md("lower"),
+    ci.upper = md("upper"),
+    z        = md("*z*"),
+    pvalue   = md("*p*"),
+    std.all  = md("*&beta;*")
+  ) |>
+  tab_spanner(
+    label   = md("95% CI"),
+    columns = c(ci.lower, ci.upper)
+  ) |>
+  fmt_number(
+    columns = c(z, std.all),
+    decimals = 2
+  ) |>
+  fmt_number(
+    columns = c(est, se, ci.lower, ci.upper),
+    decimals = 3
+  ) |>
+  cols_align(align = "center") |>
+  fmt(
+    columns = Effect, 
+    fns = function(x) lapply(x, gt::html)
+  ) |> 
+  tab_row_group(label = "Indirect Effects", id = "indirect", 
+                rows = type == "Indirect Effects") |>
+  tab_row_group(label = "Direct Effects",   id = "direct",   
+                rows = type == "Direct Effects") |>
+  tab_source_note(
+    source_note = md("*Note.* Unstandardized coefficients (*B*), standard errors (*SE*), *z* values, *p* values, and 95% bootstrap confidence intervals and standardized coefficients (&beta;) are reported. Indirect effects were estimated using 1,000 bootstrap samples.")
+  )|>
+  gt_layout()
+
+suppl_table_7
+
+gtsave(suppl_table_7, filename = "./03_tables/suppl_table_7.html")
+```
+
+## Figures
+
+The following plots illustrate the effects and results presented in the previous sections. The first two plots are part of the larger **Figure 1** of the manuscript.
+
+### Figure 1C: Performance expectations over time for all conditions, median split by narcissistic traits
+
+```{r}
+#| label: plot theme
+#| warning: false
+
+exp_theme <- theme(
+    # add border 1)
+    panel.border = element_rect(colour = "#004B5A", fill = NA, linetype = 1),
+    # color background 2)
+    panel.background = element_rect(fill = "#FFFFFF"),
+    # modify grid 3)
+    panel.grid.major.x = element_line(colour = "#CDDBD8", linetype = 3, linewidth = 0.5),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y =  element_line(colour = "#CDDBD8", linetype = 3, linewidth = 0.5),
+    panel.grid.minor.y = element_blank(),
+  text = element_text(size = 10),
+  axis.ticks = element_line(colour = "#004B5A"),
+  axis.title.x = element_text(size = 16, face="bold", margin = margin(t = 10)), 
+  axis.title.y = element_text(size = 16, face="bold", margin = margin(r = 10)), 
+  axis.text.y = element_text(color='black', size = 12, margin = margin(r = 5)),
+  axis.text.x = element_text(size = 12, color='black',margin = margin(t = 5), vjust = 0.5),
+  legend.title = element_blank(),
+  legend.text = element_text(size = 14),
+  legend.position = "right",
+  legend.direction = "vertical",
+  legend.key.size = unit(1, "line"),
+  plot.title = element_text(face="bold", size = 18)
+)
+```
+
+```{r}
+#| label: prepare expectation data
+#| warning: false
+
+# prepare exp data
+exp_data <- all_data |> 
+  filter(!is.na(GroupNar)) |> 
+  select(GroupNar,
+         starts_with("exp_self"), starts_with("exp_other"),
+         starts_with("pred_self"), starts_with("pred_other")) |> 
+  group_by(GroupNar) |> 
+  summarise(across(everything(), 
+                   list(mean = ~mean(.x, na.rm = TRUE),
+                        se   = ~sd(.x, na.rm = TRUE) / sqrt(sum(!is.na(.x)))),
+                   .names = "{.col}_{.fn}")) |> 
+  pivot_longer(-GroupNar,
+               names_to = c("condition", ".value"),
+               names_pattern = "(.*)_(mean|se)$") |> 
+  tidyr::extract(condition,
+                 into = c("data_source", "condition", "trial"),
+                 regex = "^(.*)_(.*)_(\\d+)$") |>
+  mutate(se = if_else(str_detect(data_source, "pred"), 0, se)) |> 
+  mutate(
+    Agent     = factor(if_else(str_detect(condition, "^self"), "Self", "Other"),
+                       levels = c("Self", "Other")),
+    Ability   = if_else(str_detect(condition, "pos$"), "High", "Low"),
+    groupCond = factor(paste0("NAR-", GroupNar, "/Ab-", Ability),
+                       levels = c("NAR-High/Ab-High", "NAR-High/Ab-Low",
+                                  "NAR-Low/Ab-High",  "NAR-Low/Ab-Low")),
+    trial     = factor(trial, levels = as.character(1:20))
+  )
+```
+
+```{r}
+#| label: plot performance expectations
+#| warning: false
+#| fig-width: 10
+#| fig-height: 6
+
+groupCond_colors <- c(
+  "NAR-High/Ab-High" = "#23538d", "NAR-High/Ab-Low" = "#c00000",
+  "NAR-Low/Ab-High"  = "#558ed5", "NAR-Low/Ab-Low"  = "#e69999"
+)
+
+condition_linetypes <- c(exp = "solid", pred = "dashed")
+
+linetype_labels <- c(
+  exp  = "Rated by participants",
+  pred = "Predicted by model"
+)
+
+expPlot <- ggplot(exp_data, aes(x = trial, y = mean,
+                                group = interaction(groupCond, data_source))) +
+  geom_ribbon(aes(ymin = mean - se, ymax = mean + se, fill = groupCond),
+              alpha = 0.1, show.legend = FALSE) +
+  scale_fill_manual(values = groupCond_colors, guide = "none") +
+  geom_line(aes(color = groupCond, linetype = data_source), linewidth = 1.5) +
+  facet_wrap(~Agent) +
+  scale_linetype_manual(values = condition_linetypes, labels = linetype_labels,
+                        name = "Data source") +
+  scale_color_manual(values = groupCond_colors, name = "NARQ group / ability") +
+  labs(y = "Performance Expectation", x = "Trial") +
+  guides(
+    linetype = guide_legend(override.aes = list(linewidth = 1)),
+    color    = guide_legend(override.aes = list(linewidth = 2))
+  ) +
+  scale_x_discrete(breaks = seq(0, 20, by = 5)) +
+  theme_bw() +
+  exp_theme +
+  theme(legend.position = "bottom",
+        strip.text = element_text(size = 16, face = "bold"),
+        strip.background = element_blank())
+
+expPlot
+```
+
+```{r}
+#| label: save performance expectation plot
+#| warning: false
+
+ggsave(expPlot, filename = "Figure1C.svg", path = "./02_plots", height = 5, width = 8)
+```
+
+### Figure 1D: Learning rates for positive and negative prediction errors for self and other, median split by narcissistic traits
+
+```{r}
+#| label: prepare data for plotting and define colors
+#| warning: false
+
+# Reorder levels and add GroupValence for plotting
+learning_rates_long$GroupValence <- interaction(learning_rates_long$GroupNar, learning_rates_long$PE, learning_rates_long$SelfOther, sep = "_")
+
+learning_rates_long$GroupNar <- factor(learning_rates_long$GroupNar,
+                                       levels = c("High", "Low"))
+learning_rates_long$GroupValence <- factor(learning_rates_long$GroupValence,
+  levels = c("High_pos_Self", "High_neg_Self", "High_pos_Other", "High_neg_Other",
+             "Low_pos_Self",  "Low_neg_Self",  "Low_pos_Other",  "Low_neg_Other"))
+
+set.seed(1)
+
+lr_colors <- c(
+  High_pos_Self = "#23538d", High_neg_Self = "#c00000",
+  High_pos_Other = "#23538d", High_neg_Other = "#c00000",
+  Low_pos_Self = "#558ed5",  Low_neg_Self = "#e69999",
+  Low_pos_Other = "#558ed5", Low_neg_Other = "#e69999"
+)
+```
+
+```{r}
+#| label: plot learning rates
+#| warning: false
+#| fig-width: 7
+#| fig-height: 5
+
+lrPlot <- 
+  ggplot(
+    data = learning_rates_long, aes(y = LR, x = GroupNar, fill = GroupValence)) +
+  geom_point(aes(color = GroupValence), position = position_jitterdodge(dodge.width = 0.75, jitter.width = 0.5),size = 1.5, alpha = 0.8) +
+  geom_boxplot(lwd = 0.8, outlier.shape = NA, alpha = 0.5,
+               position = position_dodge(width = 0.75), width = .6,
+               color = "black") +
+  labs(y = "Learning rate") +
+  scale_x_discrete(labels = c(High = "NAR High", Low = "NAR Low")) +
+  guides(fill = "none") +
+  scale_color_manual(values = lr_colors) +
+  scale_fill_manual(values = lr_colors) +
+  theme_bw() +
+  exp_theme +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(face = "bold", size = 16, color = "black"),
+        legend.text = element_text(size = 10),
+        legend.key.size = unit(2, "point"))
+
+lrPlot
+```
+
+```{r}
+#| label: save learning rates plot
+#| warning: false
+
+ggsave(lrPlot, filename = "Figure1D.svg", path = "./02_plots", height = 3.5, width = 6)
+```
