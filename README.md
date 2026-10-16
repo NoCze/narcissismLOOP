@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/1420616755.svg)](https://doi.org/10.5281/zenodo.23415012)
+
 # Self-enhancement and devaluation of others during belief formation are linked to narcissistic traits
 This repository contains the code for reproducing the results of the manuscript:
 "Self-enhancement and devaluation of others during belief formation are linked to narcissistic traits" by Matthiesen et al.
